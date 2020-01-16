@@ -1,0 +1,89 @@
+library(tidyverse)
+library(patchwork)
+
+fnams <- list.files("CSV Data", "td", full.names = TRUE) # needed for reading data
+subjs <- list.files("CSV Data", "td") # needed for identifying subject numbers
+
+rawData <- NULL
+for (subj in 1:length(fnams)) { 
+  
+  pData <- read_csv(fnams[subj], col_types = cols(), col_names = FALSE) # read the data from csv
+  pData <- pData %>% 
+    mutate(subj = substr(subjs[subj],1,str_length(subjs[subj])-7)) %>% 
+    select(subj,everything())
+  
+  rawData <- rbind(rawData, pData) # combine data array with existing data
+  
+}
+
+# tidy the dataframe
+data <- rawData %>% 
+  rename(trial = X1, patternID = X2, block = X3, 
+               T_loc = X4, T_colour = X5, T_orient = X6,
+               Y_colour = X7, Y_orient = X8, respKey = X9,
+               accuracy = X10, RT = X11) %>%  # rename variables (add more) %>% 
+  mutate(TT = round(patternID/10)%/%100, T_Y_cong = round(patternID/10)%%100) %>% 
+  mutate(T_Y_cong = recode(T_Y_cong, "1" = "congruent", "2" = "incongruent", .default = "NA")) %>% 
+  mutate(TT = recode(TT, "1" = "repeated", "2" = "random", "3" = "random")) %>% 
+  mutate(phase = if_else(block<=48, 1, 2)) %>% 
+  select(subj, phase, block, TT, T_Y_cong, Y_colour, accuracy, RT) %>% 
+  filter(!subj %in% c(2,3,4,11)) # these Ps completed very few blocks
+
+write_csv(data, "allData.csv")
+
+basicStats <- data %>% 
+  group_by(subj) %>% 
+  summarise(acc = mean(accuracy), rt = mean(RT))
+
+# accuracy boxplot (looks like subj 14 might be an outlier)
+accPlot <- basicStats %>% 
+  ggplot(aes(y = acc))+
+  geom_boxplot()+
+  geom_text(aes(x = 0, label = subj), hjust = 2) +
+  theme_classic()+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+
+# rt boxplot
+rtPlot <- basicStats %>% 
+  ggplot(aes(y = rt))+
+  geom_boxplot()+
+  geom_text(aes(x = 0, label = subj), hjust = 2) +
+  theme_classic()+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+
+accPlot + rtPlot
+
+data <- data %>% 
+  mutate(TT = factor(TT, levels = c("repeated", "random")),
+         T_Y_cong = factor(T_Y_cong, levels = c("congruent", "incongruent", "NA")))
+
+data %>% 
+  filter(!subj %in% c(14)) %>% # remove (potential) outliers
+  filter(phase == 1, accuracy == 1) %>%
+  group_by(block, TT) %>%
+  summarise(RT = mean(RT)) %>% 
+  ggplot(aes(x = block, y = RT, group = TT)) +
+  geom_line(aes(colour = TT)) +
+  theme_classic()
+
+data %>% 
+  filter(!subj %in% c(14)) %>% # remove (potential) outliers
+  filter(phase == 2, accuracy == 1) %>%
+  group_by(TT, T_Y_cong) %>%
+  summarise(RT = mean(RT)) %>% 
+  arrange(desc(TT)) %>% 
+  ggplot(aes(x = TT, y = RT, fill = T_Y_cong))+
+  geom_col(position = position_dodge2()) +
+  theme_classic()+
+  coord_cartesian(ylim = c(550,700))
+  
+data %>% 
+  filter(!subj %in% c(14)) %>% # remove (potential) outliers
+  filter(phase == 2, accuracy == 1, T_Y_cong == "congruent") %>%
+  group_by(subj, TT) %>%
+  summarise(RT = mean(RT)) %>% 
+  t.test(RT~TT, data = ., paired = TRUE)
